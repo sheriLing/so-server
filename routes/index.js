@@ -1,10 +1,10 @@
 const express = require('express');
 const path = require('path');
-const bodyParser = require('body-parser');
+const nodemailer = require('nodemailer');
+const fs = require('fs');
+const marked = require('marked');
 
 const router = express.Router();
-// bodyParser.urlencoded({extended: false});
-// bodyParser.json();
 
 const os = require('os');
 /* GET ip address */
@@ -33,6 +33,28 @@ const conn = mysql.createConnection({
   timezone: "SYSTEM"
 })
 
+/* 邮箱验证 */
+const sendmail = {
+  config: {
+    host: "smtp.qq.com",
+    port: 587,
+    secure: false, // true for 465, false for other ports
+    auth: {
+      user: '328121621@qq.com', // generated ethereal user
+      pass: 'hrrqbcvzlclzbgfj' // generated ethereal password
+    }
+  },
+  get transporter() {
+    return nodemailer.createTransport(this.config);
+  },
+  get verify() {
+    return Math.random().toString().substring(2, 8);
+  },
+  get time() {
+    return Date.now();
+  }
+}
+
 router.get('/getAddress', (req, res) => {
   res.send(baseURL)
 })
@@ -54,14 +76,14 @@ router.get('/getAddress', (req, res) => {
  *           "u_id": 1,
  *           "u_name": "测试01",
  *           "u_pwd": "123456",
- *           "u_phone": "123456",
+ *           "u_email": "123456",
  *           "u_img": null
  *         },
  *         {
  *           "u_id": 2,
  *           "u_name": "测试02",
  *           "u_pwd": "654321",
- *           "u_phone": "123654",
+ *           "u_email": "123654",
  *           "u_img": null
  *         }
  *       ],
@@ -78,8 +100,8 @@ router.get('/users',(req, res) => {
 })
 
 /**
- * @api {post} /loginuser 获取登录用户
- * @apiName LoginUser
+ * @api {post} /user/login 获取登录用户
+ * @apiName UserLogin
  * @apiGroup User
  *
  * @apiParam {String} u_name 用户名称。
@@ -93,24 +115,26 @@ router.get('/users',(req, res) => {
  *         {
  *           "u_id": 1,
  *           "u_name": "测试01",
- *           "u_phone": "123456",
+ *           "u_email": "123456",
  *           "u_img": null
  *         }
  *       ],
  *       "affectedRows": 0
  *     }
  */
-router.post('/loginuser',bodyParser.urlencoded({extended: false}),(req, res) => {
+router.post('/user/login',(req, res) => {
   const body = [
     req.body.uname,
     req.body.upwd
   ];
-  const sqlStr = 'select u_id,u_name,u_phone,u_himg from users where u_name = ? and u_pwd = ?';
-  console.log(req.body);
+  const sqlStr = 'select u_id,u_name,u_himg from users where u_name = ? and u_pwd = ?';
   conn.query(sqlStr, body, (err, results) => {
-    console.log(err);
-    if (err || results.length === 0) return res.json({ status: 1, message: '用户名或密码错误', affectedRows: 0 })
-    res.json({ status: 0, message: results, affectedRows: 0 })
+    if (err) return res.json({ status: 1, message: '用户名或密码错误', affectedRows: 0 })
+    console.log(results);
+    results[0].u_himg = `http://${baseURL}:8085${results[0].u_himg}`
+    req.session.islogin = true
+    req.session.logid = results[0].u_id
+    return res.json({ status: 0, message: results})
   })
 })
 /**
@@ -128,22 +152,26 @@ router.post('/loginuser',bodyParser.urlencoded({extended: false}),(req, res) => 
  *         {
  *           "u_id": 1,
  *           "u_name": "测试01",
- *           "u_pwd": "123456",
- *           "u_phone": "123456",
- *           "u_img": null
+ *           "u_himg": url
  *         }
  *       ],
  *       "affectedRows": 0
  *     }
  */
-router.get('/user/:uid',(req, res) => {
-  const uid = req.params.uid;
-  const sqlStr = 'select * from users where u_id = ?';
+router.get('/user',(req, res) => {
+  const uid = req.session.logid || req.query.uid || 0;
+  const sqlStr = 'select u_id,u_name,u_himg from users where u_id = ?';
   conn.query(sqlStr, uid, (err, results) => {
-    console.log(err);
-    if (err) return res.json({ status: 1, message: '获取用户失败', affectedRows: 0 })
-    res.json({ status: 0, message: results, affectedRows: 0 })
+    if (err) return res.json({ status: 1, message: '用户不存在', affectedRows: 0 })
+    if (!req.session.islogin) return res.json({ status: 1, message: '请先登录', affectedRows: 0 })
+    results[0].u_himg = `http://${baseURL}:8085${results[0].u_himg}`
+    return res.json({ status: 0, message: results, affectedRows: 0 })
   })
+})
+/* 退出登录 */
+router.get('/user/loginout',(req, res) => {
+  req.session.destroy();
+  return res.redirect('/');
 })
 
 /**
@@ -153,33 +181,49 @@ router.get('/user/:uid',(req, res) => {
  *
  * @apiParam {String} u_name 用户名称。
  * @apiParam {String} u_pwd 用户密码。
- * @apiParam {String} u_phone 用户手机号。
- * @apiParam {String} u_himg 用户头像路径。
+ * @apiParam {String} u_email 用户邮箱。
  *
  * @apiSuccessExample {json} Success-Response:
  *     HTTP/1.1 200 OK
  *     {
  *       "status": 0,
  *       "message": [
- *         {
- *           "u_id": 1,
- *           "u_name": "测试01",
- *           "u_pwd": "123456",
- *           "u_phone": "123456",
- *           "u_img": null
- *         }
+ *         "注册成功"
  *       ],
  *       "affectedRows": 0
  *     }
  */
 router.post('/user',(req, res) => {
   const body = req.body;
+  const verifynum = req.body.uecode
   const sqlStr = 'insert into users set ?';
+
+  if (verifynum !== req.session.verifycode) return res.json({ status: 1, message: '验证码错误', affectedRows: 0 })
   conn.query(sqlStr, body, (err, results) => {
-      if (err) return res.json({ status: 1, message: '用户已被注册', affectedRows: 0 })
-      res.json({ status: 0, message: results, affectedRows: results.affectedRows })
+    if (err) return res.json({ status: 1, message: '用户已被注册', affectedRows: 0 })
+    req.session.loguid = results[0].insertId
+    res.json({ status: 0, message: results[0].insertId, affectedRows: results.affectedRows })
   })
 })
+router.get('/email',async(req, res) => {
+  const uemail = req.query.uemail;
+  const verifyNum = sendmail.verify;
+  let options = {
+    from: '328121621@qq.com', // sender address
+    to: uemail, // list of receivers
+    subject: "星海starocean 验证码", // Subject line
+    text: "验证码："+verifyNum, // plain text body
+    html: "<b>验证码："+verifyNum+"</b>" // html body
+  };
+  await sendmail.transporter.sendMail(options, (err, info)=>{
+    if (info) {
+      req.session.verifycode = verifyNum
+      return res.json({ status: 0, message: '发送成功'})
+    }
+    return res.json({ status: 1, message: '发送失败'})
+  });
+})
+
 /**
  * 编辑用户 put
  */
@@ -214,7 +258,7 @@ router.get('/informations',(req, res) => {
  */
 router.get('/designs',(req, res) => {
   let start = ((req.query.dsindex || 1) - 1) * 2;
-  const limit = req.query.limit || 3
+  const limit = req.query.limit || 5
   const sqlStr1 = 'SELECT * FROM designs limit ' + start + ',' + limit + ' ';
   const sqlStr2 = 'SELECT count(*) FROM designs';
   conn.query(sqlStr1, (err1, results1) => {
@@ -233,13 +277,21 @@ router.get('/designs',(req, res) => {
 /**
  * 获取id对应作品 get
  */
-router.get('/designs/:dsid',(req, res) => {
-  const dsid = req.params.dsid;
+router.get('/design',(req, res) => {
+  const dsid = req.query.dsid;
+  console.log(req.query);
   const sqlStr = 'select * from designs where ds_id = ?';
   conn.query(sqlStr, dsid, (err, results) => {
     console.log(err);
     if (err) return res.json({ status: 1, message: '获取数据失败', affectedRows: 0 })
-    res.json({ status: 0, message: results, affectedRows: 0 })
+    let path = './public/' + results[0].ds_content
+    fs.readFile(path, (err, data) => {
+      console.log(err);
+      if (err) return res.json({ status: 1, message: '文件不存在'});
+      results[0].ds_content = marked(data.toString())
+      res.json({ status: 0, message: results, affectedRows: 0 })
+    })
+    // results[0].ds_content = `http://${baseURL}:8085${results[0].ds_content}`
   })
 })
 
