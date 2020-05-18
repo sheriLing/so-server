@@ -129,9 +129,8 @@ router.post('/user/login',(req, res) => {
   ];
   const sqlStr = 'select u_id,u_name,u_himg from users where u_name = ? and u_pwd = ?';
   conn.query(sqlStr, body, (err, results) => {
-    if (err) return res.json({ status: 1, message: '用户名或密码错误', affectedRows: 0 })
-    console.log(results);
-    results[0].u_himg = `http://${baseURL}:8085${results[0].u_himg}`
+    if (err || results.length <= 0) return res.json({ status: 1, message: '用户名或密码错误', affectedRows: 0 })
+    if (results[0].u_himg) results[0].u_himg = `http://${baseURL}:8085${results[0].u_himg}`;
     req.session.islogin = true
     req.session.logid = results[0].u_id
     return res.json({ status: 0, message: results})
@@ -198,6 +197,7 @@ router.post('/user',(req, res) => {
   const verifynum = req.body.uecode
   const sqlStr = 'insert into users set ?';
 
+  console.log(verifynum,req.session.verifycode);
   if (verifynum !== req.session.verifycode) return res.json({ status: 1, message: '验证码错误', affectedRows: 0 })
   conn.query(sqlStr, body, (err, results) => {
     if (err) return res.json({ status: 1, message: '用户已被注册', affectedRows: 0 })
@@ -217,7 +217,8 @@ router.get('/email',async(req, res) => {
   };
   await sendmail.transporter.sendMail(options, (err, info)=>{
     if (info) {
-      req.session.verifycode = verifyNum
+      req.session.verifycode = verifyNum.toString();
+      console.log('邮箱发送成功后session::',req.session);
       return res.json({ status: 0, message: '发送成功'})
     }
     return res.json({ status: 1, message: '发送失败'})
@@ -313,10 +314,14 @@ router.post('/design',(req, res) => {
  */
 router.get('/comments/:dsid',(req, res) => {
   const dsid = req.params.dsid;
-  const sqlStr = 'select * from designs where ds_id = ?';
+  const sqlStr = 'select c_content,c_time,u_name,u_himg from comments inner join users on comments.u_id=users.u_id where ds_id = ? order by c_time desc';
   conn.query(sqlStr, dsid, (err, results) => {
-    console.log(err);
     if (err) return res.json({ status: 1, message: '获取评论失败', affectedRows: 0 })
+    results.forEach(item => {
+      if (item.u_himg) {
+        item.u_himg = `http://${baseURL}:8085${item.u_himg}`;
+      }
+    })
     res.json({ status: 0, message: results, affectedRows: 0 })
   })
 })
@@ -324,7 +329,8 @@ router.get('/comments/:dsid',(req, res) => {
 /**
  * 作品下发表评论
  */
-router.post('/comments',(req, res) => {
+router.post('/comment',(req, res) => {
+  req.body.c_time = new Date();
   const body = req.body;
   const sqlStr = 'insert into comments set ?';
   conn.query(sqlStr, body, (err, results) => {

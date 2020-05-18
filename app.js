@@ -29,8 +29,8 @@ app.use(session({
   cookie: {
     maxAge: 60*60*1000*24*7
   },
-  resave: true,
-  saveUninitialized: false
+  resave: false,
+  saveUninitialized: true
 }))
 
 app.use('/', (req,res,next)=>{
